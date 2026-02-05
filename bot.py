@@ -1,6 +1,7 @@
+import os
 import csv
 import psycopg2
-from datetime import datetime, date
+from datetime import date
 
 from telegram import (
     Update,
@@ -18,27 +19,46 @@ from telegram.ext import (
     filters
 )
 
-# ================== CONFIG ==================
+# =====================================================
+# CONFIG (через переменные окружения)
+# =====================================================
 
-BOT_TOKEN = "TELEGRAM_BOT_TOKEN"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # https://your-app.justrunmy.app
+PORT = int(os.getenv("PORT", 8080))
 
 DB_CONFIG = {
-    "dbname": "postgres",
-    "user": "postgres",
-    "password": "SUPABASE_PASSWORD",
-    "host": "SUPABASE_HOST",
-    "port": 5432
+    "dbname": os.getenv("DB_NAME", "postgres"),
+    "user": os.getenv("DB_USER", "postgres"),
+    "password": os.getenv("DB_PASSWORD"),
+    "host": os.getenv("DB_HOST"),
+    "port": int(os.getenv("DB_PORT", 5432)),
 }
 
-ADMINS = [380617987]
+# Telegram ID
+ADMINS = [111111111]
 MASTERS = [222222222]
 
-# ================== DB ==================
+# =====================================================
+# DATABASE
+# =====================================================
 
 def get_conn():
     return psycopg2.connect(**DB_CONFIG)
 
-# ================== STATES ==================
+# =====================================================
+# ROLES
+# =====================================================
+
+def is_admin(user_id: int) -> bool:
+    return user_id in ADMINS
+
+def is_master(user_id: int) -> bool:
+    return user_id in MASTERS
+
+# =====================================================
+# STATES (ADD ORDER)
+# =====================================================
 
 (
     TITLE, MODEL, STEEL, FINISH,
@@ -46,29 +66,33 @@ def get_conn():
     DEADLINE, PHOTO
 ) = range(8)
 
-# ================== HELPERS ==================
-
-def is_admin(user_id):
-    return user_id in ADMINS
-
-def is_master(user_id):
-    return user_id in MASTERS
-
-# ================== START ==================
+# =====================================================
+# COMMANDS
+# =====================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    uid = update.effective_user.id
 
-    if is_admin(user_id):
-        text = "👑 Админ-панель\n\n/add — добавить заказ\n/orders — все заказы\n/export — экспорт CSV"
-    elif is_master(user_id):
-        text = "🛠 Мастер\n\n/orders — список заказов"
+    if is_admin(uid):
+        text = (
+            "👑 Администратор\n\n"
+            "/add — добавить заказ\n"
+            "/orders — все заказы\n"
+            "/export — экспорт CSV"
+        )
+    elif is_master(uid):
+        text = (
+            "🛠 Мастер\n\n"
+            "/orders — список заказов"
+        )
     else:
         text = "⛔ Нет доступа"
 
     await update.message.reply_text(text)
 
-# ================== ADD ORDER ==================
+# =====================================================
+# ADD ORDER FLOW
+# =====================================================
 
 async def add_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -109,12 +133,11 @@ async def set_handle_mount(update, context):
 
 async def set_deadline(update, context):
     context.user_data["deadline"] = update.message.text
-    await update.message.reply_text("Прикрепи фото или напиши /skip")
+    await update.message.reply_text("Прикрепи фото или /skip")
     return PHOTO
 
 async def set_photo(update, context):
-    photo = update.message.photo[-1]
-    context.user_data["photo"] = photo.file_id
+    context.user_data["photo"] = update.message.photo[-1].file_id
     return await save_order(update, context)
 
 async def skip_photo(update, context):
@@ -123,61 +146,78 @@ async def skip_photo(update, context):
 
 async def save_order(update, context):
     d = context.user_data
+
     conn = get_conn()
     cur = conn.cursor()
-
     cur.execute("""
-        insert into orders
+        INSERT INTO orders
         (title, model, steel, blade_finish, handle_material, handle_mount, deadline, photo_file_id)
-        values (%s,%s,%s,%s,%s,%s,%s,%s)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
     """, (
-        d["title"], d["model"], d["steel"],
-        d["finish"], d["handle_material"],
-        d["handle_mount"], d["deadline"],
+        d["title"],
+        d["model"],
+        d["steel"],
+        d["finish"],
+        d["handle_material"],
+        d["handle_mount"],
+        d["deadline"],
         d["photo"]
     ))
-
     conn.commit()
     conn.close()
 
     # уведомление мастеру
     for m in MASTERS:
         await context.bot.send_message(
-            m,
-            f"🆕 Новый заказ: {d['title']} (дедлайн {d['deadline']})"
+            chat_id=m,
+            text=f"🆕 Новый заказ: {d['title']}\n📅 Дедлайн: {d['deadline']}"
         )
 
     await update.message.reply_text("✅ Заказ добавлен")
     return ConversationHandler.END
 
-# ================== ORDERS ==================
+# =====================================================
+# ORDERS LIST
+# =====================================================
 
 async def orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("select id, title, deadline, status from orders order by deadline")
+    cur.execute("""
+        SELECT id, title, deadline, status
+        FROM orders
+        ORDER BY deadline
+    """)
     rows = cur.fetchall()
     conn.close()
 
+    if not rows:
+        await update.message.reply_text("Пока заказов нет")
+        return
+
     for oid, title, deadline, status in rows:
-        overdue = "⚠️" if deadline and deadline < date.today() else ""
-        kb = [
+        overdue = "⚠️ ПРОСРОЧЕН\n" if deadline and deadline < date.today() else ""
+        kb = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("👁", callback_data=f"view:{oid}"),
                 InlineKeyboardButton("🔄", callback_data=f"status:{oid}"),
                 InlineKeyboardButton("❌", callback_data=f"del:{oid}")
             ]
-        ]
+        ])
+
         await update.message.reply_text(
-            f"{overdue} #{oid} {title}\n📅 {deadline} | {status}",
-            reply_markup=InlineKeyboardMarkup(kb)
+            f"{overdue}#{oid} — {title}\n📅 {deadline} | {status}",
+            reply_markup=kb
         )
 
-# ================== CALLBACKS ==================
+# =====================================================
+# CALLBACKS
+# =====================================================
 
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
+
     action, oid = q.data.split(":")
     oid = int(oid)
 
@@ -185,17 +225,20 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cur = conn.cursor()
 
     if action == "view":
-        cur.execute("select * from orders where id=%s", (oid,))
+        cur.execute("SELECT * FROM orders WHERE id=%s", (oid,))
         o = cur.fetchone()
+
         text = (
             f"🧾 {o[1]}\n"
-            f"Модель: {o[2]}\nСталь: {o[3]}\n"
+            f"Модель: {o[2]}\n"
+            f"Сталь: {o[3]}\n"
             f"Финиш: {o[4]}\n"
             f"Рукоять: {o[5]}\n"
             f"Монтаж: {o[6]}\n"
             f"Дедлайн: {o[7]}\n"
             f"Статус: {o[8]}"
         )
+
         if o[9]:
             await q.message.reply_photo(o[9], caption=text)
         else:
@@ -203,33 +246,35 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif action == "status":
         cur.execute("""
-            update orders
-            set status = case
-                when status='new' then 'in_work'
-                when status='in_work' then 'done'
-                else 'new'
-            end
-            where id=%s
+            UPDATE orders
+            SET status = CASE
+                WHEN status='new' THEN 'in_work'
+                WHEN status='in_work' THEN 'done'
+                ELSE 'new'
+            END
+            WHERE id=%s
         """, (oid,))
         conn.commit()
         await q.message.reply_text("🔄 Статус обновлён")
 
     elif action == "del" and is_admin(q.from_user.id):
-        cur.execute("delete from orders where id=%s", (oid,))
+        cur.execute("DELETE FROM orders WHERE id=%s", (oid,))
         conn.commit()
         await q.message.reply_text("❌ Заказ удалён")
 
     conn.close()
 
-# ================== EXPORT ==================
+# =====================================================
+# EXPORT CSV
+# =====================================================
 
-async def export(update: Update, context):
+async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
 
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("select * from orders")
+    cur.execute("SELECT * FROM orders")
     rows = cur.fetchall()
     conn.close()
 
@@ -237,21 +282,26 @@ async def export(update: Update, context):
         writer = csv.writer(f)
         writer.writerow([
             "id","title","model","steel","finish",
-            "handle","mount","deadline","status","photo","created"
+            "handle_material","handle_mount",
+            "deadline","status","photo","created_at"
         ])
         writer.writerows(rows)
 
     await update.message.reply_document(InputFile("orders.csv"))
 
-# ================== MAIN ==================
+# =====================================================
+# MAIN (WEBHOOK)
+# =====================================================
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    # commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("orders", orders))
     app.add_handler(CommandHandler("export", export))
 
+    # add order conversation
     conv = ConversationHandler(
         entry_points=[CommandHandler("add", add_order)],
         states={
@@ -265,7 +315,7 @@ def main():
             PHOTO: [
                 MessageHandler(filters.PHOTO, set_photo),
                 CommandHandler("skip", skip_photo)
-            ]
+            ],
         },
         fallbacks=[]
     )
@@ -273,7 +323,13 @@ def main():
     app.add_handler(conv)
     app.add_handler(CallbackQueryHandler(callbacks))
 
-    app.run_polling()
+    # webhook
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path="webhook",
+        webhook_url=f"{WEBHOOK_URL}/webhook"
+    )
 
 if __name__ == "__main__":
     main()
