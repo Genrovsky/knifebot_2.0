@@ -24,7 +24,6 @@ from telegram.ext import (
 # =====================================================
 print(">>> BOT FILE LOADED <<<", flush=True)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # https://gitr_z7ayk-f20.c.jrnm.app
 PORT = int(os.getenv("PORT", 8080))
 
 DB_CONFIG = {
@@ -36,7 +35,6 @@ DB_CONFIG = {
 }
 
 print("BOT_TOKEN:", BOT_TOKEN, flush=True)
-print("WEBHOOK_URL:", WEBHOOK_URL, flush=True)
 
 # Telegram ID
 ADMINS = [380617987]
@@ -291,18 +289,17 @@ async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Telegram достучался!")
 
 # =====================================================
-# MAIN (WEBHOOK)
+# MAIN (POLLING)
 # =====================================================
 def main():
     print(">>> MAIN STARTED <<<", flush=True)
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # commands
+    # --- handlers ---
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("orders", orders))
     app.add_handler(CommandHandler("export", export))
 
-    # add order conversation
     conv = ConversationHandler(
         entry_points=[CommandHandler("add", add_order)],
         states={
@@ -326,13 +323,8 @@ def main():
     # debug handler
     app.add_handler(MessageHandler(filters.ALL, debug))
 
-    # webhook
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path="webhook",
-        webhook_url=f"{WEBHOOK_URL}/webhook"
-    )
+    # --- POLLING ---
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
