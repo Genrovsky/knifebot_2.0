@@ -34,6 +34,8 @@ DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
     "port": int(os.getenv("DB_PORT", 5432)),
 }
+print("BOT_TOKEN:", os.getenv("BOT_TOKEN"), flush=True)
+print("WEBHOOK_URL:", os.getenv("WEBHOOK_URL"), flush=True)
 
 # Telegram ID
 ADMINS = [380617987]
