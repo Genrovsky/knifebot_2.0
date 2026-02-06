@@ -17,6 +17,9 @@ from telegram.ext import (
     ConversationHandler,
     ContextTypes,
     filters
+    async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print(">>> UPDATE RECEIVED <<<", flush=True)
+    await update.message.reply_text("OK")
 )
 
 # =====================================================
