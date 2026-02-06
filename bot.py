@@ -24,7 +24,7 @@ from telegram.ext import (
 # =====================================================
 print(">>> BOT FILE LOADED <<<", flush=True)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # https://your-app.justrunmy.app
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # https://gitr_z7ayk-f20.c.jrnm.app
 PORT = int(os.getenv("PORT", 8080))
 
 DB_CONFIG = {
@@ -34,8 +34,9 @@ DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
     "port": int(os.getenv("DB_PORT", 5432)),
 }
-print("BOT_TOKEN:", os.getenv("BOT_TOKEN"), flush=True)
-print("WEBHOOK_URL:", os.getenv("WEBHOOK_URL"), flush=True)
+
+print("BOT_TOKEN:", BOT_TOKEN, flush=True)
+print("WEBHOOK_URL:", WEBHOOK_URL, flush=True)
 
 # Telegram ID
 ADMINS = [380617987]
@@ -44,14 +45,12 @@ MASTERS = [222222222]
 # =====================================================
 # DATABASE
 # =====================================================
-
 def get_conn():
     return psycopg2.connect(**DB_CONFIG)
 
 # =====================================================
 # ROLES
 # =====================================================
-
 def is_admin(user_id: int) -> bool:
     return user_id in ADMINS
 
@@ -61,7 +60,6 @@ def is_master(user_id: int) -> bool:
 # =====================================================
 # STATES (ADD ORDER)
 # =====================================================
-
 (
     TITLE, MODEL, STEEL, FINISH,
     HANDLE_MAT, HANDLE_MOUNT,
@@ -71,7 +69,6 @@ def is_master(user_id: int) -> bool:
 # =====================================================
 # COMMANDS
 # =====================================================
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
 
@@ -95,7 +92,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =====================================================
 # ADD ORDER FLOW
 # =====================================================
-
 async def add_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return ConversationHandler.END
@@ -181,7 +177,6 @@ async def save_order(update, context):
 # =====================================================
 # ORDERS LIST
 # =====================================================
-
 async def orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = get_conn()
     cur = conn.cursor()
@@ -199,13 +194,11 @@ async def orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for oid, title, deadline, status in rows:
         overdue = "⚠️ ПРОСРОЧЕН\n" if deadline and deadline < date.today() else ""
-        kb = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("👁", callback_data=f"view:{oid}"),
-                InlineKeyboardButton("🔄", callback_data=f"status:{oid}"),
-                InlineKeyboardButton("❌", callback_data=f"del:{oid}")
-            ]
-        ])
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("👁", callback_data=f"view:{oid}"),
+            InlineKeyboardButton("🔄", callback_data=f"status:{oid}"),
+            InlineKeyboardButton("❌", callback_data=f"del:{oid}")
+        ]])
 
         await update.message.reply_text(
             f"{overdue}#{oid} — {title}\n📅 {deadline} | {status}",
@@ -215,7 +208,6 @@ async def orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =====================================================
 # CALLBACKS
 # =====================================================
-
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -269,7 +261,6 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =====================================================
 # EXPORT CSV
 # =====================================================
-
 async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
@@ -292,9 +283,16 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_document(InputFile("orders.csv"))
 
 # =====================================================
+# DEBUG HANDLER
+# =====================================================
+async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print(">>> UPDATE RECEIVED <<<", flush=True)
+    if update.message:
+        await update.message.reply_text("✅ Telegram достучался!")
+
+# =====================================================
 # MAIN (WEBHOOK)
 # =====================================================
-
 def main():
     print(">>> MAIN STARTED <<<", flush=True)
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -308,13 +306,13 @@ def main():
     conv = ConversationHandler(
         entry_points=[CommandHandler("add", add_order)],
         states={
-            TITLE: [MessageHandler(filters.TEXT, set_title)],
-            MODEL: [MessageHandler(filters.TEXT, set_model)],
-            STEEL: [MessageHandler(filters.TEXT, set_steel)],
-            FINISH: [MessageHandler(filters.TEXT, set_finish)],
-            HANDLE_MAT: [MessageHandler(filters.TEXT, set_handle_mat)],
-            HANDLE_MOUNT: [MessageHandler(filters.TEXT, set_handle_mount)],
-            DEADLINE: [MessageHandler(filters.TEXT, set_deadline)],
+            TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_title)],
+            MODEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_model)],
+            STEEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_steel)],
+            FINISH: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_finish)],
+            HANDLE_MAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_handle_mat)],
+            HANDLE_MOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_handle_mount)],
+            DEADLINE: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_deadline)],
             PHOTO: [
                 MessageHandler(filters.PHOTO, set_photo),
                 CommandHandler("skip", skip_photo)
@@ -322,9 +320,11 @@ def main():
         },
         fallbacks=[]
     )
-
     app.add_handler(conv)
     app.add_handler(CallbackQueryHandler(callbacks))
+
+    # debug handler
+    app.add_handler(MessageHandler(filters.ALL, debug))
 
     # webhook
     app.run_webhook(
