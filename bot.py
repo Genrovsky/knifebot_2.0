@@ -22,7 +22,7 @@ from telegram.ext import (
 # =====================================================
 # CONFIG (через переменные окружения)
 # =====================================================
-
+print(">>> BOT FILE LOADED <<<", flush=True)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # https://your-app.justrunmy.app
 PORT = int(os.getenv("PORT", 8080))
@@ -36,7 +36,7 @@ DB_CONFIG = {
 }
 
 # Telegram ID
-ADMINS = [111111111]
+ADMINS = [380617987]
 MASTERS = [222222222]
 
 # =====================================================
@@ -294,6 +294,7 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =====================================================
 
 def main():
+    print(">>> MAIN STARTED <<<", flush=True)
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     # commands
